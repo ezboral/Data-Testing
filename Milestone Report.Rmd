@@ -1,0 +1,402 @@
+---
+title: "Credit Card Default Analysis Milestone Report"
+author: "Eitan Boral"
+date: "September 6, 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Predicting the Accuracy of Credit Card Default
+
+Credit card use has exploded from its infancy in the 1920s to the present. What started out as a niche product for business customers has become a universally accepted method of payment used for almost any transaction imaginable.
+
+At the end of 2016, outstanding credit card debt totaled just over \$750 billion in the US alone. The average household balance was just over \$16,000 at the end of the same period. 
+[Credit Card Data](https://www.nerdwallet.com/blog/average-credit-card-debt-household/)
+
+Credit cards today are usually issued by banks, and offer a line of credit to the cardholder.  The cardholder can borrow money or draw down on the line of credit, but will be charged interest on any overdue monthly balance. 
+
+While outstanding credit card debt presents a risk to the consumer in the form of higher interest payments, it also presents a risk to the lender in the form of a potential default. When the issuer is unlikely to collect credit card debt, they will write it off as a loss or charge-off.  A predictive model that can accurately profile a reliable borrower is very valuable information to financial institutions and can ultimatley help them reduce their charge-off rates. Can we identify characteristics of borrowers that can better assess their likelihood of default?
+
+## The Data
+
+While not focused on the US market, the data set for this project looked at one response variable, default or payment of credit card debt for 30,000 Taiwanese credit card holders in October 2005.
+
+* Y: Client action: (0 = no default,  1 = default)<br/>
+
+The following 23 independent variables were also included.
+
+* X1: Credit limit available to the borrower<br/>
+* X2: Gender (1 = male; 2 = female)<br/>
+* X3: Education level (1 = graduate school; 2 = university; 3 = high school; 0, 4, 5, 6 = other)<br/>
+* X4: Marital status (1 = married; 2 = single; 3 = divorce; 0 = other)<br/>
+* X5: Age in years<br/>
+* X6-X11: History of past payment from April to September of 2005. X6 = September; X7 = August;...;X11 = April<br/> 
+    The payment scale:
+    + -2 = No consumption (card holder has nothing due and didn't access line of credit)<br/> 
+    + -1 = Paid in full (previous balance has been paid off)<br/> 
+    + 0 = Revolving credit (previous balance not fully paid off)<br/>
+    + 1 = Payment delay for 1 month; 2 = payment delay for 2 months;...; 9 = payment delay for 9 months and above<br/>
+* X12-X17: Monthly balance for past six months (April - September of 2005).  X12 = September; X13 = August;...;X17 = April.<br/>
+* X18-X23: Amount of previous monthly payment for past six months (April - September of 2005). X18 = September; X19 = August;...;X23 = April. <br/>
+
+Data is available at the following link: 
+[Data set](http://archive.ics.uci.edu/ml/datasets/default+of+credit+card+clients)
+
+### Data Limitations
+
+Two very important independent variables that are not included in the data set are the credit score and annual income of the borrower. Both of these variables are important data points that financial institutions review before issuing new cards. We are unable to test out this assumption, and any conclusions from the existing data set should take into account that these two factors were not included.
+
+Another limitation is the study's focus on the Taiwanese credit card market. The health of the Taiwanese economy, domestic interest rates at the time of the study, and local political or cultural factors may have had an effect on the default rate that may not be applicable in other populations.  
+
+Finally, the time period of this study saw an unusually high default rate for the Taiwanese credit card market. 2005 was a period where many Taiwanese financial institutions greatly expanded credit card issuance with little to no regard for the ability of borrowers to repay. In addition, card holders accumulated a higher than average level of debt during this period. Credit card lending in Taiwan during this period was similar in some ways to the mortgage loan market in the US leading up to the 2008 housing crisis.  Any conclusions about credit card default during the time of this study may be less relevant than in "normal" times. 
+
+### Data Wrangling
+
+The original data set was very clean, with no missing fields or N/As for data points.  
+
+Data import
+
+``` {r eval = FALSE}
+library(readr)
+dcc <- read_csv("~/dcc.csv")
+```
+
+The following libraries were used for data cleaning.
+
+``` {r eval = FALSE}
+library(dplyr)
+library(tidyr)
+library(plyr)
+```
+
+The column headings were originally in the form of X1, X2, X3 etc. These were renamed to the appropriate titles (Gender, Education etc). In addition, duplicate rows and the ID column were removed.
+
+``` {r eval = FALSE}
+colnames(dcc) <- dcc[1,]
+dcc = dcc[-1,]
+dcc <- dcc[-1]
+
+colnames(dcc)[1] <- "LimitAmt"
+
+colnames(dcc)[2] <- "Gender"
+colnames(dcc)[3] <- "Education"
+colnames(dcc)[4] <- "Marriage"
+colnames(dcc)[5] <- "Age"
+
+colnames(dcc)[6] <- "StatusSep05"
+colnames(dcc)[7] <- "StatusAug05"
+colnames(dcc)[8] <- "StatusJul05"
+colnames(dcc)[9] <- "StatusJun05"
+colnames(dcc)[10] <- "StatusMay05"
+colnames(dcc)[11] <- "StatusApr05"
+
+colnames(dcc)[12] <- "BalSep05"
+colnames(dcc)[13] <- "BalAug05"
+colnames(dcc)[14] <- "BalJul05"
+colnames(dcc)[15] <- "BalJun05"
+colnames(dcc)[16] <- "BalMay05"
+colnames(dcc)[17] <- "BalApr05"
+
+colnames(dcc)[18] <- "PayAmtSep05"
+colnames(dcc)[19] <- "PayAmtAug05"
+colnames(dcc)[20] <- "PayAmtJul05"
+colnames(dcc)[21] <- "PayAmtJun05"
+colnames(dcc)[22] <- "PayAmtMay05"
+colnames(dcc)[23] <- "PayAmtApr05"
+
+colnames(dcc)[24] <- "DefaultOct05"
+```
+
+The bulk of data clean up was focused on transforming numerical values such as 0, 1, 2 etc to character values and renaming those fields.  For example, the Gender column used the values 1 and 2 to represent male and female. Both 1 and 2 were converted to factor values and renamed to "Male" and "Female".  Due to the large number of variables, only a sample of the code used for the gender variable is below.  The same code was applied to Education, Marriage, the Default status, and the six Payment status variables.
+
+``` {r eval = FALSE}
+dcc$Gender <- factor(dcc$Gender)
+levels(dcc$Gender) <- c("Male", "Female")
+```
+
+The age of borrowers ranged from 21 to 79, and the credit limit amount ranged from \$10,000 to \$1,000,000. In order to segment the population of borrowers based on credit limit and age it was necessary to group them into bins. 
+
+``` {r eval = FALSE}
+dcc$LimitAmtBin <- paste(dcc$LoanAmt)
+dcc$LimitAmtBin <- as.numeric(as.character(dcc$LoanAmtBin))
+sapply(dcc$LoanAmtBin, class)
+LAmtCut <- cut(dcc$LoanAmtBin, breaks = c(0, 10000, 25000, 50000, 100000, 250000, 500000, 1000000),
+               labels = c("10KLimit", "25KLimit", "50KLimit", "100KLimit", "250KLimit", "500KLimit", "1MilLimit"))
+dcc$LoanAmtBin <- LAmtCut
+
+dcc$AgeBin <- paste(dcc$Age)
+dcc$AgeBin <- as.numeric(as.character(dcc$AgeBin))
+sapply(dcc$AgeBin, class)
+AgeCut <- cut(dcc$AgeBin, breaks = c(20, 25, 30, 35, 40, 50, 60, 80),
+              labels = c("25Y", "30Y", "35Y", "40Y", "50Y", "60Y", "80Y"))
+dcc$AgeBin <- AgeCut       
+```
+
+The same process was required for the six monthly balance fields, and the six monthly payment amount fields.  The code for the September balance and September payment amount fields are below.  The same code was also used for the other five months for both balance and payment amount.
+
+``` {r eval = FALSE}
+dcc$BalBinSep05 <- paste(dcc$BalSep05)
+dcc$BalBinSep05 <- as.numeric(as.character(dcc$BalBinSep05))
+sapply(dcc$BalBinSep05, class)
+BalSepCut <- cut(dcc$BalBinSep05, breaks = c(-1000000, -1, 0, 3000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000),
+                 labels = c("NegSepBal", "ZeroSepBal", "3KSepBal", "10KSepBal", "25KSepBal", "50KSepBal", "100KSepBal", "250KSepBal", "500KSepBal", "1milSepBal"))
+dcc$BalBinSep05 <- BalSepCut
+
+dcc$PayAmtBinSep05 <- paste(dcc$PayAmtSep05)
+dcc$PayAmtBinSep05 <- as.numeric(as.character(dcc$PayAmtBinSep05))
+sapply(dcc$PayAmtBinSep05, class)
+PaySepCut <- cut(dcc$PayAmtBinSep05, breaks = c(-1000000, 0, 1000, 1500, 2000, 2500, 5000, 10000, 25000, 100000, 1000000),
+                 labels = c("ZeroPayAmtSep", "1KPayAmtSep", "1.5KPayAmtSep", "2KPayAmtSep", "2.5KPayAmtSep", "5KPayAmtSep", "10KPayAmtSep", "25KPayAmtSep", "100KPayAmtSep", ">100KPayAmtSep"))
+dcc$PayAmtBinSep05 <- PaySepCut
+```
+
+The final step was to create a new file called clean.csv. From now on, we'll use the clean file for analysis.   
+
+``` {r eval = FALSE}
+write.csv(dcc, "clean.csv")
+```
+
+``` {r}
+library(readr)
+clean <- read_csv("~/clean.csv")
+```
+
+## Preliminary Exploration
+
+The goal of preliminary exploration was to study the relationship between the default rate and the 23 independent variables. If default rates for any of the independent variables are meaningfully higher or lower than the baseline default rate, then these variables are worth exploring futher.
+
+The first step was to look at the average default rate across all loans.
+
+``` {r}
+table(clean$DefaultOct05)/length(clean$DefaultOct05)
+```
+
+We see that 22.12% of borrowers defaulted on their credit card debt.  This will be our baseline number for comparison.
+
+What does the default rate look like for borrowers based on credit limit, age, gender, education level, or marriage status?
+
+``` {r eval = FALSE}
+clean %>% 
+  group_by(LimitAmtBin) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(AgeBin) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(Gender) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(Education) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(Marriage) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+```
+
+Each credit limit amount was split into bins. Each bin includes the amount that can be borrowed up to and including the amount listed. For example, the 10k bin includes all borrowers that can borrow up to \$10,000 or less. The 25K bin includes limit amounts from \$10,001 to \$25,000. 
+
+We see that those with the lowest limits have the highest default rates, and as the limit increases the default rate decreases.  For example, limits of \$10,000 or less default nearly 40.0% of the time. That number drops to just onver 35% and just under 30% for the 25K and 50K loan bins. The two largest bins (\$250,001-\$500,000 and \$500,001-\$1,000,000) default 14.03% and 11.17% of the time, well below the baseline default rate of 22.12%.
+
+The age breakdown shows a different trend.  The youngest and oldest borrowers (25 and below and those between 61 to 80) have the highest default rates, both approaching 27.0%.  However, middle-age borrowers (31-35) have the lowest default rate of 19.42%. Default rates based on age have a V shape.
+
+The gender breakdown shows males have a much higher default rate of 24.17% compared to 20.78% for females.  
+
+Education shows an interesting trend that intuitively makes sense.  The higher the level of education, the lower the default rate.  For example, those with only a high school education default over 25% of the time, while those with only a bachelors have a default rate of 23.73%, which is higher than our baseline, but still an improvement over high school.  Finally, those with a graduate degree have the lowest default rate of 19.23%. 
+
+Marriage status provides a mixed picture. Both married and divorced borrowers default around 23.5% of the time while single borrowers who haven't been married default 20.92% of the time. 
+
+The next six independent variables are the monthly payment status from September to April.
+
+``` {r eval = FALSE}
+clean %>% 
+  group_by(StatusSep05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(StatusAug05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(StatusJul05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(StatusJun05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(StatusMay05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(StatusApr05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+```
+
+Regardless of month, the payment status shows a much lower default rate than the baseline for those that fall into the No Consumption, Paid in full or Revolving bins. However, those that are one or more months behind have very high default rates.  Aside from September, the 1 month delay field has an insignificant number of occurrences. Loans that are two or more months behind see default rates that are 50% or higher regardless of what month they are behind. We see that there isn't much middle ground when it comes to payment status. If a cardholder is behind they are much more likely to default compared to the baseline. If they are on time, they are much less likely to default compared to the baseline.
+
+The next six independent variables are the monthly balance from September to April.
+
+``` {r eval = FALSE}
+clean %>% 
+  group_by(BalBinSep05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(BalBinAug05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(BalBinJul05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(BalBinJun05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(BalBinMay05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(BalBinApr05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+```
+
+Each monthly balance was split into bins. Each bin includes any balance up to and including the amount listed. For example, those loans with a balance less than \$0 were labeled negative, while those with no balance were labeled Zero.  A balance between \$1 and \$3000 is labeled 3K and so on.
+
+Regardless of the month, a negative balance saw a default rate well below the baseline of 22.12% (never exceeding 20%). As the balance grows, there is no clear trend in the default rate.  Across all six months, the default rate is higher than the base line for the Zero bin, but lower for the 3K and 10K bins.  Then the 25K bin sees a jump in default rate.  We see this up and down default rate across different balances.
+
+The final six independent variabls are the monthly payment amounts for September through April.
+
+``` {r eval = FALSE}
+clean %>% 
+  group_by(PayAmtBinSep05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(PayAmtBinAug05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(PayAmtBinJul05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(PayAmtBinJun05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(PayAmtBinMay05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+
+clean %>% 
+  group_by(PayAmtBinApr05) %>%
+  summarise(Def = sum(DefaultOct05 == 'Def'),
+            NDef = sum(DefaultOct05 != 'Def'),
+            DRate = mean(DefaultOct05 == 'Def'))
+```
+The payment amounts were separated into bins much like the balances.  We see a very clear trend with the payment amount variables.  The lower the payment, the higher the default rate.  This is true across all six months. For example, those that payed nothing had default rates ranging from nearly 29% to 36% depending on the month.  This is well above the base line. As the payment amount moved to the 1K, 1.5K, 2K, and 2.5K bins, the default rate dropped to 20%-24% range (depending on the month).  As payment amounts reached the 100K and >100K amounts, default rates hovered around 8%, well below the baseline.  Clearly the higher the monthly payment amount, the lower the default rate.
+
+After preliminary exploration, the variables that appear important when assessing potential default are Credit limit, Age, Education, payment status and payment amount.
+
+## Feature Engineering
+
+The goal of feature engineering was to combine different independent variables together and create additional features in order to see if these combinations led to even higher or lower default rates than previously observed.
+
+For example, a high school education level and credit limit of \$10,000 or less both saw higher default rates than the base line.  If we combine Education and the credit limit bin, what does the default rate look like for those that borrowed \$10,000 or less and had only a high school education?
+
+There were a total of 18 combinations created. Due to the large number of variables, an example of the code used to combine columns for education and age is below.   
+
+``` {r eval = FALSE}
+dcc$EA <- paste(dcc$Education, "-", dcc$AgeBin)
+```
+
+After creating each combination, there were 41 different variables to compare to default (the 23 original independent variable, and the 18 different combinations).
+
+As a way to rank the default rate for each variable, it was necessary to combine the output for each of the 41 variables and then rank them by default rate.  This required additional data manipulation.
+
+The first step was assigning each variable a value and converting the output to a data frame.  An example for the credit limit and age bins is below.
+
+``` {r eval = FALSE}
+a <- as.data.frame(clean %>% 
+                     group_by(LimitAmtBin) %>%
+                     summarise(Def = sum(DefaultOct05 == 'Def'),
+                               NDef = sum(DefaultOct05 != 'Def'),
+                               DRate = mean(DefaultOct05 == 'Def')))
+
+a$refcol <- a$LimitAmtBin
+
+b <- as.data.frame(clean %>% 
+                     group_by(AgeBin) %>%
+                     summarise(Def = sum(DefaultOct05 == 'Def'),
+                               NDef = sum(DefaultOct05 != 'Def'),
+                               DRate = mean(DefaultOct05 == 'Def')))
+```
+ 
+Once this process was completed for all 41 variables, they were combined into one table. Only the four columns showing the number of defaults, the number of nondefaults, the default rate, andwhich variables were combined were kept. 
+ 
+``` {r eval = FALSE}
+aggdf <- rbind.fill(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, la, lg, le, lm, ge, gm, ga, em, ea, ma, gm, lag, lae, lam, lage, lagm, laem, lagem)
+
+aggdf <- aggdf[-1]
+aggdf[5:43] = NULL
+
+
+```
+ 
+ 
