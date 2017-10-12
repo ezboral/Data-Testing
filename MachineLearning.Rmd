@@ -1,0 +1,417 @@
+---
+title: "Machine Learning"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+``` {r, warning = FALSE, message = FALSE}
+library(readr)
+library(caTools)
+library(ROCR)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+dcc <- read_csv("~/dcc.csv")
+```
+
+``` {r eval = TRUE, echo = FALSE, results = "hide"}
+# Change column names from X1, X2 etc to the value in row 2
+colnames(dcc) <- dcc[1,]
+
+# Delete row 2 to remove duplicate titles
+dcc = dcc[-1,]
+
+# Remove ID column (column #1)
+dcc <- dcc[-1]
+
+# Clean up column names
+names(dcc) <- c("LimitAmt", "Gender", "Education", "Marriage", "Age", "StatusSep05", "StatusAug05"
+                , "StatusJul05", "StatusJun05", "StatusMay05", "StatusApr05", "BalSep05", "BalAug05",
+                "BalJul05", "BalJun05", "BalMay05", "BalApr05", "PayAmtSep05", "PayAmtAug05",
+                "PayAmtJul05", "PayAmtJun05", "PayAmtMay05", "PayAmtApr05", "DefaultOct05")
+```
+
+The data set needs to be transformed into a data frame.
+
+``` {r eval = TRUE, echo = FALSE, results = "hide"}
+# Transform data set to data frame
+dcc <- as.data.frame(dcc)
+```
+
+``` {r eval = TRUE, echo = FALSE, results = "hide"}
+# Convert columns in data set to numeric
+dcc[] <- lapply(dcc, function(x) as.numeric(x))
+```
+
+``` {r eval = TRUE, echo = FALSE, results = "hide"}
+# Convert 4,5, and 6 to 0 as they all represent "Other"
+dcc$Education[dcc$Education == 4] <- 0
+dcc$Education[dcc$Education == 5] <- 0
+dcc$Education[dcc$Education == 6] <- 0
+```
+
+``` {r eval = TRUE, echo = FALSE, results = "hide"}
+# Add duplicate columns with different character types
+dcc$Gender1 <- paste(dcc$Gender)
+dcc$Education1 <- paste(dcc$Education)
+dcc$Marriage1 <- paste(dcc$Marriage)
+dcc$Status1Sep05 <- paste(dcc$StatusSep05)
+dcc$Status1Aug05 <- paste(dcc$StatusAug05)
+dcc$Status1Jul05 <- paste(dcc$StatusJul05)
+dcc$Status1Jun05 <- paste(dcc$StatusJun05)
+dcc$Status1May05 <- paste(dcc$StatusMay05)
+dcc$Status1Apr05 <- paste(dcc$StatusApr05)
+dcc$Default1Oct05 <- paste(dcc$DefaultOct05)
+```
+
+``` {r eval = TRUE, echo = FALSE, results = "hide"}
+# Change values from integer to categorical for Sex, Education, Marriage, Default columns
+
+dcc$Gender1 <- factor(dcc$Gender1)    
+levels(dcc$Gender1) <- c("Male", "Female")
+
+dcc$Education1 <- factor(dcc$Education1)
+levels(dcc$Education1) <- c("Other", "GradSch", "Bachelors", "HS")
+
+dcc$Marriage1 <- factor(dcc$Marriage1)
+levels(dcc$Marriage1) <- c("Div", "Mar", "Single", "Div")
+
+dcc$Default1Oct05 <- factor(dcc$Default1Oct05)  #NDef and Def stand for No Default and Default
+levels(dcc$Default1Oct05) <- c("NDef", "Def")
+
+# Change values from integer to categorical for payment status columns from Apr05 to May05
+
+dcc$Status1Sep05 <- factor(dcc$Status1Sep05)
+dcc$Status1Aug05 <- factor(dcc$Status1Aug05)
+dcc$Status1Jul05 <- factor(dcc$Status1Jul05)
+dcc$Status1Jun05 <- factor(dcc$Status1Jun05)
+dcc$Status1May05 <- factor(dcc$Status1May05)
+dcc$Status1Apr05 <- factor(dcc$Status1Apr05)
+
+# Change values from -2, -1, etc to character strings
+
+levels(dcc$Status1Sep05)<- c("SepPaid", "SepNoCons", "SepRev", "Sep1MoD", "Sep2MoD", "Sep3MoD", "Sep4MoD", "Sep5MoD", "Sep6MoD", "Sep7MoD", "Sep8MoD")
+levels(dcc$Status1Aug05)<- c("AugPaid", "AugNoCons", "AugRev", "Aug1MoD", "Aug2MoD", "Aug3MoD", "Aug4MoD", "Aug5MoD", "Aug6MoD", "Aug7MoD", "Aug8MoD")
+levels(dcc$Status1Jul05)<- c("JulPaid", "JulNoCons", "JulRev", "Jul1MoD", "Jul2MoD", "Jul3MoD", "Jul4MoD", "Jul5MoD", "Jul6MoD", "Jul7MoD", "Jul8MoD")
+levels(dcc$Status1Jun05)<- c("JunPaid", "JunNoCons", "JunRev", "Jun1MoD", "Jun2MoD", "Jun3MoD", "Jun4MoD", "Jun5MoD", "Jun6MoD", "Jun7MoD", "Jun8MoD")
+levels(dcc$Status1May05)<- c("MayPaid", "MayNoCons", "MayRev", "May2MoD", "May3MoD", "May4MoD", "May5MoD", "May6MoD", "May7MoD", "May8MoD")
+levels(dcc$Status1Apr05)<- c("AprPaid", "AprNoCons", "AprRev", "Apr2MoD", "Apr3MoD", "Apr4MoD", "Apr5MoD", "Apr6MoD", "Apr7MoD", "Apr8MoD")
+```
+
+``` {r eval = TRUE, echo = FALSE, results = "hide"}
+# Create bins for credit limit and age so we can group borrowers into different categories
+# The LAmtCut and AgeCut variables represent where the cutoff for each bin is
+
+dcc$LimitAmtBin <- paste(dcc$LimitAmt)
+dcc$LimitAmtBin <- as.numeric(as.character(dcc$LimitAmtBin))
+sapply(dcc$LimitAmtBin, class)
+LAmtCut <- cut(dcc$LimitAmtBin, breaks = c(0, 10000, 25000, 50000, 100000, 250000, 500000, 1000000),
+               labels = c("10KLimit", "25KLimit", "50KLimit", "100KLimit", "250KLimit", "500KLimit", "1MilLimit"))
+dcc$LimitAmtBin <- LAmtCut
+
+dcc$AgeBin <- paste(dcc$Age)
+dcc$AgeBin <- as.numeric(as.character(dcc$AgeBin))
+sapply(dcc$AgeBin, class)
+AgeCut <- cut(dcc$AgeBin, breaks = c(20, 25, 30, 35, 40, 50, 60, 80),
+              labels = c("25Y", "30Y", "35Y", "40Y", "50Y", "60Y", "80Y"))
+dcc$AgeBin <- AgeCut
+```
+
+``` {r eval = TRUE, echo = FALSE, results = "hide"}
+
+dcc$BalBinSep05 <- paste(dcc$BalSep05)
+dcc$BalBinSep05 <- as.numeric(as.character(dcc$BalBinSep05))
+sapply(dcc$BalBinSep05, class)
+BalSepCut <- cut(dcc$BalBinSep05, breaks = c(-1000000, -1, 0, 3000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000),
+                 labels = c("NegSepBal", "ZeroSepBal", "3KSepBal", "10KSepBal", "25KSepBal", "50KSepBal", "100KSepBal", "250KSepBal", "500KSepBal", "1milSepBal"))
+dcc$BalBinSep05 <- BalSepCut
+
+dcc$BalBinAug05 <- paste(dcc$BalAug05)
+dcc$BalBinAug05 <- as.numeric(as.character(dcc$BalBinAug05))
+sapply(dcc$BalBinAug05, class)
+BalAugCut <- cut(dcc$BalBinAug05, breaks = c(-1000000, -1, 0, 3000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000),
+                 labels = c("NegAugBal", "ZeroAugBal", "3KAugBal", "10KAugBal", "25KAugBal", "50KAugBal", "100KAugBal", "250KAugBal", "500KAugBal", "1milAugBal"))
+dcc$BalBinAug05 <- BalAugCut
+
+dcc$BalBinJul05 <- paste(dcc$BalJul05)
+dcc$BalBinJul05 <- as.numeric(as.character(dcc$BalBinJul05))
+sapply(dcc$BalBinJul05, class)
+BalJulCut <- cut(dcc$BalBinJul05, breaks = c(-1000000, -1, 0, 3000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000),
+                 labels = c("NegJulBal", "ZeroJulBal", "3KJulBal", "10KJulBal", "25KJulBal", "50KJulBal", "100KJulBal", "250KJulBal", "500KJulBal", "1milJulBal"))
+dcc$BalBinJul05 <- BalJulCut
+
+dcc$BalBinJun05 <- paste(dcc$BalJun05)
+dcc$BalBinJun05 <- as.numeric(as.character(dcc$BalBinJun05))
+sapply(dcc$BalBinJun05, class)
+BalJunCut <- cut(dcc$BalBinJun05, breaks = c(-1000000, -1, 0, 3000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000),
+                 labels = c("NegJunBal", "ZeroJunBal", "3KJunBal", "10KJunBal", "25KJunBal", "50KJunBal", "100KJunBal", "250KJunBal", "500KJunBal", "1milJunBal"))
+dcc$BalBinJun05 <- BalJunCut
+
+dcc$BalBinMay05 <- paste(dcc$BalMay05)
+dcc$BalBinMay05 <- as.numeric(as.character(dcc$BalBinMay05))
+sapply(dcc$BalBinMay05, class)
+BalMayCut <- cut(dcc$BalBinMay05, breaks = c(-1000000, -1, 0, 3000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000),
+                 labels = c("NegMayBal", "ZeroMayBal", "3KMayBal", "10KMayBal", "25KMayBal", "50KMayBal", "100KMayBal", "250KMayBal", "500KMayBal", "1milMayBal"))
+dcc$BalBinMay05 <- BalMayCut
+
+dcc$BalBinApr05 <- paste(dcc$BalApr05)
+dcc$BalBinApr05 <- as.numeric(as.character(dcc$BalBinApr05))
+sapply(dcc$BalBinApr05, class)
+BalAprCut <- cut(dcc$BalBinApr05, breaks = c(-1000000, -1, 0, 3000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000),
+                 labels = c("NegAprBal", "ZeroAprBal", "3KAprBal", "10KAprBal", "25KAprBal", "50KAprBal", "100KAprBal", "250KAprBal", "500KAprBal", "1milAprBal"))
+dcc$BalBinApr05 <- BalAprCut
+
+dcc$PayAmtBinSep05 <- paste(dcc$PayAmtSep05)
+dcc$PayAmtBinSep05 <- as.numeric(as.character(dcc$PayAmtBinSep05))
+sapply(dcc$PayAmtBinSep05, class)
+PaySepCut <- cut(dcc$PayAmtBinSep05, breaks = c(-1000000, 0, 1000, 1500, 2000, 2500, 5000, 10000, 25000, 100000, 1000000),
+                 labels = c("ZeroPayAmtSep", "1KPayAmtSep", "1.5KPayAmtSep", "2KPayAmtSep", "2.5KPayAmtSep", "5KPayAmtSep", "10KPayAmtSep", "25KPayAmtSep", "100KPayAmtSep", ">100KPayAmtSep"))
+dcc$PayAmtBinSep05 <- PaySepCut
+
+dcc$PayAmtBinAug05 <- paste(dcc$PayAmtAug05)
+dcc$PayAmtBinAug05 <- as.numeric(as.character(dcc$PayAmtBinAug05))
+sapply(dcc$PayAmtBinAug05, class)
+PayAugCut <- cut(dcc$PayAmtBinAug05, breaks = c(-1000000, 0, 1000, 1500, 2000, 2500, 5000, 10000, 25000, 100000, 1000000),
+                 labels = c("ZeroPayAmtAug", "1KPayAmtAug", "1.5KPayAmtAug", "2KPayAmtAug", "2.5KPayAmtAug", "5KPayAmtAug", "10KPayAmtAug", "25KPayAmtAug", "100KPayAmtAug", ">100KPayAmtAug"))
+dcc$PayAmtBinAug05 <- PayAugCut
+
+dcc$PayAmtBinJul05 <- paste(dcc$PayAmtJul05)
+dcc$PayAmtBinJul05 <- as.numeric(as.character(dcc$PayAmtBinJul05))
+sapply(dcc$PayAmtBinJul05, class)
+PayJulCut <- cut(dcc$PayAmtBinJul05, breaks = c(-1000000, 0, 1000, 1500, 2000, 2500, 5000, 10000, 25000, 100000, 1000000),
+                 labels = c("ZeroPayAmtJul", "1KPayAmtJul", "1.5KPayAmtJul", "2KPayAmtJul", "2.5KPayAmtJul", "5KPayAmtJul", "10KPayAmtJul", "25KPayAmtJul", "100KPayAmtJul", ">100KPayAmtJul"))
+dcc$PayAmtBinJul05 <- PayJulCut
+
+dcc$PayAmtBinJun05 <- paste(dcc$PayAmtJun05)
+dcc$PayAmtBinJun05 <- as.numeric(as.character(dcc$PayAmtBinJun05))
+sapply(dcc$PayAmtBinJun05, class)
+PayJunCut <- cut(dcc$PayAmtBinJun05, breaks = c(-1000000, 0, 1000, 1500, 2000, 2500, 5000, 10000, 25000, 100000, 1000000),
+                 labels = c("ZeroPayAmtJun", "1KPayAmtJun", "1.5KPayAmtJun", "2KPayAmtJun", "2.5KPayAmtJun", "5KPayAmtJun", "10KPayAmtJun", "25KPayAmtJun", "100KPayAmtJun", ">100KPayAmtJun"))
+dcc$PayAmtBinJun05 <- PayJunCut
+
+dcc$PayAmtBinMay05 <- paste(dcc$PayAmtMay05)
+dcc$PayAmtBinMay05 <- as.numeric(as.character(dcc$PayAmtBinMay05))
+sapply(dcc$PayAmtBinMay05, class)
+PayMayCut <- cut(dcc$PayAmtBinMay05, breaks = c(-1000000, 0, 1000, 1500, 2000, 2500, 5000, 10000, 25000, 100000, 1000000),
+                 labels = c("ZeroPayAmtMay", "1KPayAmtMay", "1.5KPayAmtMay", "2KPayAmtMay", "2.5KPayAmtMay", "5KPayAmtMay", "10KPayAmtMay", "25KPayAmtMay", "100KPayAmtMay", ">100KPayAmtMay"))
+dcc$PayAmtBinMay05 <- PayMayCut
+
+dcc$PayAmtBinApr05 <- paste(dcc$PayAmtApr05)
+dcc$PayAmtBinApr05 <- as.numeric(as.character(dcc$PayAmtBinApr05))
+sapply(dcc$PayAmtBinApr05, class)
+PayAprCut <- cut(dcc$PayAmtBinApr05, breaks = c(-1000000, 0, 1000, 1500, 2000, 2500, 5000, 10000, 25000, 100000, 1000000),
+                 labels = c("ZeroPayAmtApr", "1KPayAmtApr", "1.5KPayAmtApr", "2KPayAmtApr", "2.5KPayAmtApr", "5KPayAmtApr", "10KPayAmtApr", "25KPayAmtApr", "100KPayAmtApr", ">100KPayAmtApr"))
+dcc$PayAmtBinApr05 <- PayAprCut
+```
+## Data Analysis
+
+In this section we will use machine learning methods to build three different models that will predict the probability of either a default or no default using the independent variables in our data set.  We will build a logistic regression model, a classification and regression tree (CART), and a random forest model.
+
+We saw earlier that the default rate across all loans is 22.12%, which means that 77.88% of loans are not defaulting.  Our goal is to improve upon the baseline with each model.
+
+### Logistic Regression
+
+We first split the data into a training data set and testing data set. We will use the training set to discover potentially predictive relationships and use the testing set to assess the performance of these relationships. 
+
+Our training set uses 75% of the observations, and our testing set uses 25%. The set.seed variable is used to make sure the dependent variable (default) is well balanced in both the training and testing sets.  
+
+``` {r eval = TRUE, echo = TRUE}
+# Split data into training and testing set with a 75/25 ratio
+set.seed(64)
+split = sample.split(dcc$DefaultOct05, SplitRatio = 0.75)
+dccTrain = subset(dcc, split == TRUE)
+dccTest = subset(dcc, split == FALSE)
+```
+
+``` {r eval = TRUE, echo = TRUE}
+# Check rows for both the training and testing set
+nrow(dccTrain)
+nrow(dccTest)
+```
+
+We see there are 22,500 rows in the training data set and 7,500 in the testing data set which is consistent with a 75/25 split.
+
+We will now build our model using the training data set. We start with a large universe of variables and continue to refine our model by removing those with no significance.
+
+##### Model1
+
+``` {r eval = TRUE, echo = TRUE}
+# Model 1 starts with almost all the independent variables
+dccLog1 = glm(DefaultOct05 ~ LimitAmt + Gender + Education + Marriage + Age +
+                StatusSep05 + StatusAug05 + StatusJul05 + StatusJun05 + StatusMay05 +
+                StatusApr05 + PayAmtSep05 + PayAmtAug05 + PayAmtMay05 + PayAmtApr05 +
+                BalSep05 + BalAug05 + BalJul05 + BalJun05 + BalMay05 + BalApr05, 
+              data=dccTrain, family=binomial)
+
+summary(dccLog1)
+```
+
+We see that 7 variables are not significant. We will remove the variables with no significance and rerun the model. 
+
+##### Model2
+
+``` {r eval = TRUE, echo = TRUE}
+# Model 2 removes insignificant variables
+dccLog2 = glm(DefaultOct05 ~ LimitAmt + Gender + Marriage + Age +
+                StatusSep05 + StatusAug05 + StatusJul05 + PayAmtSep05 + PayAmtAug05 + 
+                PayAmtMay05 + BalSep05 + BalAug05 + BalMay05 + BalApr05, 
+              data=dccTrain, family=binomial)
+
+summary(dccLog2)
+```
+
+We see an improvement in the AIC score from 20935 to 20933, but one of the remaining variables is not significant. Once again, we will remove this variable and rerun the model.
+
+##### Model3
+
+``` {r eval = TRUE, echo = TRUE}
+# Model 3 removes one more that is insignificant
+dccLog3 = glm(DefaultOct05 ~ LimitAmt + Gender + Marriage + Age +
+                StatusSep05 + StatusAug05 + StatusJul05 + PayAmtSep05 + PayAmtAug05 + 
+                PayAmtMay05 + BalSep05 + BalAug05 + BalApr05, 
+              data=dccTrain, family=binomial)
+
+summary(dccLog3)
+```
+
+The April Balance amount is insignificant.  After removing this variable we run our model once more, however the AIC score is slightly higher (moving from 20933 to 20934)
+
+##### Model4
+
+``` {r eval = TRUE, echo = TRUE}
+# Model 4 shows all remaining variables with significance
+dccLog4 = glm(DefaultOct05 ~ LimitAmt + Gender + Marriage + Age +
+                StatusSep05 + StatusAug05 + StatusJul05 + PayAmtSep05 + PayAmtAug05 + 
+                PayAmtMay05 + BalSep05 + BalAug05, 
+              data=dccTrain, family=binomial)
+
+summary(dccLog4)
+```
+
+Model 4 appears to be the best mix of independent variables as it delivers an AIC score of 20934, and shows significance of between 0 and 0.001 or between 0.001 and 0.01 for all independent variables. The coefficients for Age, payment status, and the August balance variable are positive, which indicates that higher values are indicative of a higher chance of default.  
+
+#### Predict the data
+
+By using a threshold value, we can convert our probabilities to predictions.  If the probability of default is greater than the threshold, then we predict default. If its below, then we predict no default.  The threshold we start with is based on what type of error we are more comfortable with.  A high threshold will lead to fewer innacurately predicted defaults but more innacurate predictions of a loan non defaulting. A low threshold will lead to the opposite. If there is no preference between the two errors we can choose a threshold of 0.5 since it is in between our two outcomes (0 or 1).
+
+Using a threshold of 0.5, lets look at how our model works with the test data set.
+
+``` {r eval = TRUE, echo = TRUE}
+# Prediction on Test data
+predictdccTest = predict(dccLog4, type="response", newdata = dccTest)
+table(dccTest$DefaultOct05, predictdccTest > 0.5)
+```
+
+The matrix above shows the breakdown of of all defaults.  The rows are the acutal result (0 = no default, 1 = default), the columns are the predictions. We see that out of 7,500 occurrences, we have 6090 correct predictions (5682 loans predicted to be paid off, 408 predicted to default). 
+
+However, 1251 loans did default that were predicted to be paid off. We also see that of the loans predicted to default, 159 were actually paid off.
+
+Our overall accuracy measures the number of correct predictions divided by the total number of loans.
+
+``` {r eval = TRUE, echo = TRUE}
+# Check for accuracy of model
+TestAccuracy = (5682 + 408)/(5682 + 408 + 1251 + 159)
+TestAccuracy
+```
+
+The accuracy of the model is 81.2%.
+
+This tells us that our model is a better predictor of default compared to a random guess, or our baseline (77.88%).
+
+### Classification Tree
+
+While logistic regression shows how an independent variable may be predictive for a specific outcome, it's difficult to understand which factors are most important, and to evaluate what the prediction is for a new case. 
+
+The classification tree also predicts the probability of a specific outcome. By following a split in the tree, we can predict the most frequent outcome in the training set that followed the same path.  
+
+We use the same training and testing as with our logistic regression model. 
+
+``` {r eval = TRUE, echo = TRUE}
+# Split data and create train/test sets
+set.seed(64)
+split = sample.split(dcc$DefaultOct05, SplitRatio = 0.75)
+dccTrain = subset(dcc, split == TRUE)
+dccTest = subset(dcc, split == FALSE)
+```
+
+We then build the model, and examine the tree. and its accuracy.
+
+``` {r eval = TRUE, echo = TRUE}
+# Build classification tree model with all variables
+dccTree = rpart(DefaultOct05 ~ LimitAmtBin + Gender1 + Education1 + Marriage1 + AgeBin + StatusSep05 + 
+                  StatusAug05 + StatusJul05 + StatusJun05 + StatusMay05 + StatusApr05 +
+                  PayAmtSep05 + PayAmtAug05 + PayAmtJul05 + PayAmtJun05 + PayAmtMay05 + 
+                  PayAmtApr05 + BalSep05 + BalAug05 + BalJul05 + BalJun05 + BalMay05 + BalApr05, 
+                data = dccTrain, method = "class", control = rpart.control(minbucket = 25))
+
+# Look at tree
+prp(dccTree)
+```
+
+The tree shows the payment status for September variable as its only node. If a loan is less than 1.5 months behind, then it is less likely to default. If a loan is more than 1.5 months behind its more likely to default. 
+
+Only one node appears in the tree which may be confusing since our model includes all 23 independent variables. This tells us that the September payment status is the most important factor in predicting default. Other variables are not as important.
+
+An important note is that the September payment status variable precedes our dependent variable by one month. This may give extra weight to September in the model. In practice, a financial institution would not be limited to the previous six months of data, and there may not be an ending date for every loan since credit card debt is revolving. 
+
+Finally, we apply the model to our test set.
+
+``` {r eval = TRUE, echo = TRUE}
+# Apply on test set and look at accuracy of model
+PredictCARTdcc = predict(dccTree, newdata = dccTest, type = "class")
+table(dccTest$DefaultOct05, PredictCARTdcc)
+```
+
+The confusion matrix shows the accuracy of our model.
+
+``` {r eval = TRUE, echo = TRUE}
+# Examine accuracy
+CAccuracy = (5615 + 546)/(5615 + 546 + 1113 + 226)
+CAccuracy
+```
+
+The classification tree has an accuracy of 82.15%, which is a slight improvement over the logistic regression model
+
+### Random Forest
+
+Our final approach is the random forest model. This was designed to improve the accuracy of CART by building a large number of CART trees. Random forest selects data randomly with replacement.
+
+As with the previous models, we use the same split for the training and testing data sets.  We then try the model on the testing data set.
+
+``` {r eval = TRUE, echo = TRUE}
+# Split data, build model, apply to test set
+set.seed(64)
+split = sample.split(dcc$DefaultOct05, SplitRatio = 0.75)
+dccTrain = subset(dcc, split == TRUE)
+dccTest = subset(dcc, split == FALSE)
+
+dccTrain$Default1Oct05 = as.factor(dccTrain$Default1Oct05)
+dccTest$Default1Oct05 = as.factor(dccTest$Default1Oct05)
+
+dccForest = randomForest(Default1Oct05 ~ LimitAmtBin + Gender + Education + AgeBin + StatusSep05 + 
+                           StatusAug05 + StatusJul05 + StatusJun05 + StatusMay05 + StatusApr05 +
+                           PayAmtSep05 + PayAmtAug05 + PayAmtJul05 + PayAmtJun05 + PayAmtMay05 +
+                           PayAmtApr05 +BalSep05 + BalAug05 + BalJul05 + BalJun05 + BalMay05 + 
+                           BalApr05, data = dccTrain, nodesize = 25, ntree = 200)
+
+PredictdccForest = predict(dccForest, newdata = dccTest)
+table(dccTest$DefaultOct05, PredictdccForest)
+```
+
+``` {r eval = TRUE, echo = TRUE}
+# Examine accuracy
+RAccuracy = (5540 + 595)/(5540 + 595 + 1064 + 301)
+RAccuracy
+```
+
+The accuracy of the random forrest model is 81.8%.
+
+## Conclusions
+
+Each or our three models predicts an accuracy in the 81%-82% range. With no model, a random loan has a 77.88% likelihood of not defaulting. We've been able to improve upon our baseline by 3.5%-4.0% depending on the model. This is a modest improvement, but may not be significant enough to replace any existing loan screening mechanism. 
